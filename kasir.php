@@ -48,55 +48,68 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         mysqli_query($conn, "SELECT * FROM barang WHERE id_barang='$id_barang'")
     );
 
-    $harga_jual = $barang['harga_jual'];
-    $stok = $barang['stok'];
-
-    if ($quantity > $stok) {
-        echo "<script>alert('Stok tidak mencukupi!');</script>";
+    if (!$barang) {
+        echo "<script>alert('Barang tidak valid!');</script>";
     } else {
-        $total = $harga_jual * $quantity;
+        $harga_jual = $barang['harga_jual'];
+        $stok = $barang['stok'];
 
-        mysqli_query($conn, "INSERT INTO kasir
-            (
-                id_barang,
-                nama_toko,
-                tanggal,
-                jatuh_tempo,
-                metode_pembayaran,
-                quantity,
-                harga_jual,
-                total,
-                status_pembayaran
-            )
-            VALUES
-            (
-                '$id_barang',
-                '$nama_toko',
-                '$tanggal',
-                $jatuh_tempo_sql,
-                '$metode_pembayaran',
-                '$quantity',
-                '$harga_jual',
-                '$total',
-                '$status_pembayaran'
-            )
-        ");
+        if ($quantity > $stok) {
+            echo "<script>alert('Stok tidak mencukupi!');</script>";
+        } else {
+            $total = $harga_jual * $quantity;
 
-        mysqli_query($conn, "
-            UPDATE barang
-            SET stok = stok - $quantity
-            WHERE id_barang='$id_barang'
-        ");
+            mysqli_query($conn, "INSERT INTO kasir
+                (
+                    id_barang,
+                    nama_toko,
+                    tanggal,
+                    jatuh_tempo,
+                    metode_pembayaran,
+                    quantity,
+                    harga_jual,
+                    total,
+                    status_pembayaran
+                )
+                VALUES
+                (
+                    '$id_barang',
+                    '$nama_toko',
+                    '$tanggal',
+                    $jatuh_tempo_sql,
+                    '$metode_pembayaran',
+                    '$quantity',
+                    '$harga_jual',
+                    '$total',
+                    '$status_pembayaran'
+                )
+            ");
 
-        echo "<script>
-                alert('Transaksi berhasil disimpan!');
-                window.location='kasir.php';
-              </script>";
-        exit();
+            mysqli_query($conn, "
+                UPDATE barang
+                SET stok = stok - $quantity
+                WHERE id_barang='$id_barang'
+            ");
+
+            echo "<script>
+                    alert('Transaksi berhasil disimpan!');
+                    window.location='kasir.php';
+                  </script>";
+            exit();
+        }
     }
 }
 
-$data_barang = mysqli_query($conn, "SELECT * FROM barang ORDER BY nama_barang ASC");
+$data_barang = mysqli_query($conn, "
+    SELECT id_barang, nama_barang, stok, harga_jual
+    FROM barang
+    ORDER BY nama_barang ASC
+");
+$barang_list = [];
+
+while ($barang = mysqli_fetch_assoc($data_barang)) {
+    $barang_list[] = $barang;
+}
 
 $data_kasir = mysqli_query($conn, "
     SELECT k.*, b.nama_barang
@@ -123,6 +136,36 @@ $total_bulanan = mysqli_query($conn, "
 <head>
     <title>Kasir Penjualan</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .twitter-typeahead {
+            width: 100%;
+        }
+
+        .tt-menu {
+            width: 100%;
+            margin-top: 2px;
+            padding: 4px 0;
+            background: #fff;
+            border: 1px solid rgba(0, 0, 0, .15);
+            border-radius: .375rem;
+            box-shadow: 0 .5rem 1rem rgba(0, 0, 0, .15);
+        }
+
+        .tt-suggestion {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        .tt-suggestion:hover,
+        .tt-cursor {
+            color: #fff;
+            background: #0d6efd;
+        }
+
+        .tt-highlight {
+            font-weight: 700;
+        }
+    </style>
 </head>
 
 <body class="bg-light">
@@ -160,18 +203,15 @@ $total_bulanan = mysqli_query($conn, "
 
             <div class="mb-3">
                 <label>Nama Barang</label>
-                <select name="id_barang" class="form-control" required>
-                    <option value="">-- Pilih Barang --</option>
-
-                    <?php while($barang = mysqli_fetch_assoc($data_barang)) { ?>
-                        <option value="<?= $barang['id_barang']; ?>">
-                            <?= $barang['nama_barang']; ?> |
-                            Stok: <?= $barang['stok']; ?> |
-                            Harga: Rp<?= number_format($barang['harga_jual']); ?>
-                        </option>
-                    <?php } ?>
-
-                </select>
+                <input type="hidden" name="id_barang" id="id_barang">
+                <input
+                    type="text"
+                    id="nama_barang"
+                    class="form-control"
+                    placeholder="Ketik nama barang..."
+                    autocomplete="off"
+                    required
+                >
             </div>
 
             <div class="mb-3">
@@ -271,6 +311,91 @@ $total_bulanan = mysqli_query($conn, "
     </div>
 
 </div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/typeahead.js@0.11.1/dist/typeahead.bundle.min.js"></script>
+<script>
+    const barangList = <?= json_encode($barang_list, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, function (char) {
+            return {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            }[char];
+        });
+    }
+
+    function formatRupiah(value) {
+        return new Intl.NumberFormat('id-ID').format(Number(value || 0));
+    }
+
+    $(function () {
+        const $namaBarang = $('#nama_barang');
+        const $idBarang = $('#id_barang');
+        let selectedNamaBarang = '';
+
+        $namaBarang.typeahead(
+            {
+                hint: true,
+                highlight: true,
+                minLength: 1
+            },
+            {
+                name: 'barang',
+                display: 'nama_barang',
+                limit: 10,
+                source: function (query, syncResults) {
+                    const keyword = query.toLowerCase();
+                    const matches = barangList.filter(function (barang) {
+                        return barang.nama_barang.toLowerCase().includes(keyword);
+                    });
+
+                    syncResults(matches);
+                },
+                templates: {
+                    suggestion: function (barang) {
+                        return '<div><strong>' + escapeHtml(barang.nama_barang) + '</strong><br><small>Stok: ' + escapeHtml(barang.stok) + ' | Harga: Rp' + formatRupiah(barang.harga_jual) + '</small></div>';
+                    }
+                }
+            }
+        );
+
+        $namaBarang.on('typeahead:select typeahead:autocomplete', function (event, barang) {
+            selectedNamaBarang = barang.nama_barang;
+            $idBarang.val(barang.id_barang);
+        });
+
+        $namaBarang.on('input', function () {
+            if ($namaBarang.val() !== selectedNamaBarang) {
+                $idBarang.val('');
+            }
+        });
+
+        $('form').on('submit', function (event) {
+            if ($idBarang.val()) {
+                return;
+            }
+
+            const typedName = $namaBarang.val().trim().toLowerCase();
+            const exactMatch = barangList.find(function (barang) {
+                return barang.nama_barang.toLowerCase() === typedName;
+            });
+
+            if (exactMatch) {
+                $idBarang.val(exactMatch.id_barang);
+                return;
+            }
+
+            event.preventDefault();
+            alert('Pilih barang dari daftar saran.');
+            $namaBarang.focus();
+        });
+    });
+</script>
 
 </body>
 </html>
